@@ -299,6 +299,59 @@ services:
     networks:
       - ndp-network
 
+  regulator-service:
+    build:
+      context: .
+      dockerfile: ./infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: regulator-service
+    container_name: ndp-regulator-service
+    environment:
+      NODE_ENV: development
+      PORT: 3009
+      LOG_LEVEL: info
+      PRESCRIPTION_SERVICE_URL: http://prescription-service:3001
+      DISPENSE_SERVICE_URL: http://dispense-service:3002
+      MEDICATION_SERVICE_URL: http://medication-directory:3003
+      NOTIFICATION_SERVICE_URL: http://notification-service:3008
+    ports:
+      - "3009:3009"
+    depends_on:
+      prescription-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3009/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ndp-network
+
+  reporting-service:
+    build:
+      context: .
+      dockerfile: ./infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: reporting-service
+    container_name: ndp-reporting-service
+    environment:
+      NODE_ENV: development
+      PORT: 3010
+      LOG_LEVEL: info
+      PRESCRIPTION_SERVICE_URL: http://prescription-service:3001
+      DISPENSE_SERVICE_URL: http://dispense-service:3002
+      MEDICATION_SERVICE_URL: http://medication-directory:3003
+      REGULATOR_SERVICE_URL: http://regulator-service:3009
+    ports:
+      - "3010:3010"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3010/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ndp-network
+
   # ============================================================================
   # Optional: Keycloak for SSO (Development)
   # ============================================================================

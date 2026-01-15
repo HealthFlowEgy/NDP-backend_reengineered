@@ -26,6 +26,8 @@ const SERVICES = {
   aiValidation: process.env['AI_VALIDATION_SERVICE_URL'] || 'http://localhost:3006',
   legacy: process.env['LEGACY_ADAPTER_URL'] || 'http://localhost:3007',
   notification: process.env['NOTIFICATION_SERVICE_URL'] || 'http://localhost:3008',
+  regulator: process.env['REGULATOR_SERVICE_URL'] || 'http://localhost:3009',
+  reporting: process.env['REPORTING_SERVICE_URL'] || 'http://localhost:3010',
 };
 
 async function main() {
@@ -258,6 +260,28 @@ async function main() {
     onError: (err, req, res) => {
       logger.error('Proxy error (notification)', err);
       (res as Response).status(502).json({ error: { code: 'NOTIFICATION_UNAVAILABLE', message: 'Notification service unavailable' } });
+    },
+  }));
+  
+  // Proxy to Regulator Service
+  app.use('/api/regulator', createProxyMiddleware({
+    target: SERVICES.regulator,
+    changeOrigin: true,
+    pathRewrite: { '^/api/regulator': '/api/regulator' },
+    onError: (err, req, res) => {
+      logger.error('Proxy error (regulator)', err);
+      (res as Response).status(502).json({ error: { code: 'REGULATOR_UNAVAILABLE', message: 'Regulator service unavailable' } });
+    },
+  }));
+  
+  // Proxy to Reporting Service
+  app.use('/api/reports', createProxyMiddleware({
+    target: SERVICES.reporting,
+    changeOrigin: true,
+    pathRewrite: { '^/api/reports': '/api/reports' },
+    onError: (err, req, res) => {
+      logger.error('Proxy error (reporting)', err);
+      (res as Response).status(502).json({ error: { code: 'REPORTING_UNAVAILABLE', message: 'Reporting service unavailable' } });
     },
   }));
   

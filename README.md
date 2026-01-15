@@ -142,15 +142,24 @@ docker-compose down
 - [x] Notification templates (Arabic/English)
 - [x] Verification code sending
 
-### Sprint 5 (Weeks 9-10)
-- [ ] Legacy adapter
-- [x] API Gateway
-- [ ] Backward compatibility testing
+### Sprint 5 ✅ (Weeks 9-10)
+- [x] Regulator Portal Service (EDA oversight)
+- [x] Drug recall management (Class I/II/III)
+- [x] Compliance alert system
+- [x] Practitioner analytics & monitoring
+- [x] Medication usage analytics
+- [x] Geographic distribution stats
+- [x] Audit logging
+- [x] Reporting Service
+- [x] Multiple report types (prescriptions, dispenses, controlled substances)
+- [x] CSV/JSON export
+- [x] Async report generation with job tracking
 
 ### Sprint 6 (Weeks 11-12)
-- [ ] Regulator portal API
-- [ ] Drug recalls
+- [ ] Kubernetes manifests
+- [ ] CI/CD pipeline
 - [ ] Production deployment
+- [ ] Load testing
 
 ## 🔐 Security
 
