@@ -1,0 +1,460 @@
+# ============================================================================
+# Enhanced Legacy Adapter v2.0 - Kubernetes Deployment
+# High-scalability SOAP adapter with Kafka async processing
+# ============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: legacy-adapter-v2-config
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: legacy-adapter-v2
+    app.kubernetes.io/version: "2.0.0"
+data:
+  # Feature flags
+  ENABLE_ASYNC_PROCESSING: "true"
+  ENABLE_CACHING: "true"
+  ENABLE_RATE_LIMITING: "true"
+  ENABLE_CIRCUIT_BREAKER: "true"
+  
+  # Rate limiting
+  MAX_CONCURRENT: "100"
+  MIN_TIME_MS: "10"
+  RATE_LIMIT_PER_SEC: "1000"
+  
+  # Backend services
+  PRESCRIPTION_SERVICE_URL: "http://prescription-service:3001"
+  DISPENSE_SERVICE_URL: "http://dispense-service:3002"
+  MEDICATION_SERVICE_URL: "http://medication-directory:3003"
+  AUTH_SERVICE_URL: "http://auth-service:3004"
+  SIGNING_SERVICE_URL: "http://signing-service:3005"
+  
+  # Kafka
+  KAFKA_BROKERS: "kafka-0.kafka-headless.ndp-kafka:9092,kafka-1.kafka-headless.ndp-kafka:9092,kafka-2.kafka-headless.ndp-kafka:9092"
+  
+  # Redis
+  REDIS_URL: "redis://redis:6379"
+  
+  # Elasticsearch
+  ELASTICSEARCH_URL: "http://elasticsearch.ndp-logging:9200"
+
+---
+# ============================================================================
+# Legacy Adapter Service - Main API
+# ============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: legacy-adapter-v2
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: legacy-adapter-v2
+    app.kubernetes.io/component: api
+    app.kubernetes.io/version: "2.0.0"
+spec:
+  replicas: 5  # Higher baseline for legacy traffic
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: legacy-adapter-v2
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: legacy-adapter-v2
+        app.kubernetes.io/component: api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3007"
+        prometheus.io/path: "/metrics"
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: legacy-adapter-v2
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: legacy-adapter
+          image: ghcr.io/healthflow/ndp/legacy-adapter:2.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3007
+              name: http
+          envFrom:
+            - configMapRef:
+                name: legacy-adapter-v2-config
+          env:
+            - name: PORT
+              value: "3007"
+            - name: NODE_ENV
+              value: "production"
+            - name: SERVICE_NAME
+              value: "legacy-adapter-v2"
+            - name: LOG_LEVEL
+              value: "info"
+            - name: ELASTICSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: elasticsearch-credentials
+                  key: password
+                  optional: true
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3007
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3007
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+---
+# ============================================================================
+# Legacy Adapter Worker - Kafka Consumer
+# ============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: legacy-adapter-worker
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: legacy-adapter-v2
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/version: "2.0.0"
+spec:
+  replicas: 3  # Multiple workers for parallel processing
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: legacy-adapter-v2
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: legacy-adapter-v2
+        app.kubernetes.io/component: worker
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: legacy-adapter-v2
+                    app.kubernetes.io/component: worker
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: worker
+          image: ghcr.io/healthflow/ndp/legacy-adapter:2.0
+          imagePullPolicy: Always
+          command: ["node", "dist/worker.js"]
+          envFrom:
+            - configMapRef:
+                name: legacy-adapter-v2-config
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: SERVICE_NAME
+              value: "legacy-adapter-worker"
+            - name: LOG_LEVEL
+              value: "info"
+            - name: USE_PGBOUNCER
+              value: "true"
+            - name: PGBOUNCER_HOST
+              value: "pgbouncer"
+            - name: PGBOUNCER_PORT
+              value: "6432"
+            - name: ELASTICSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: elasticsearch-credentials
+                  key: password
+                  optional: true
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+---
+# ============================================================================
+# Service
+# ============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: legacy-adapter-v2
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: legacy-adapter-v2
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3007
+      targetPort: 3007
+      name: http
+  selector:
+    app.kubernetes.io/name: legacy-adapter-v2
+    app.kubernetes.io/component: api
+
+---
+# ============================================================================
+# HorizontalPodAutoscaler - Aggressive Scaling for Legacy Traffic
+# ============================================================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: legacy-adapter-v2-hpa
+  namespace: ndp
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: legacy-adapter-v2
+  minReplicas: 5
+  maxReplicas: 30
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60  # Lower threshold for faster scaling
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30  # Fast scale up
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+        - type: Pods
+          value: 5
+          periodSeconds: 15
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300  # Slow scale down
+      policies:
+        - type: Percent
+          value: 10
+          periodSeconds: 60
+
+---
+# ============================================================================
+# HPA for Workers
+# ============================================================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: legacy-adapter-worker-hpa
+  namespace: ndp
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: legacy-adapter-worker
+  minReplicas: 3
+  maxReplicas: 15
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+---
+# ============================================================================
+# PodDisruptionBudget
+# ============================================================================
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: legacy-adapter-v2-pdb
+  namespace: ndp
+spec:
+  minAvailable: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: legacy-adapter-v2
+      app.kubernetes.io/component: api
+
+---
+# ============================================================================
+# NetworkPolicy - Allow traffic from Ingress and internal services
+# ============================================================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: legacy-adapter-v2-network
+  namespace: ndp
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: legacy-adapter-v2
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: api-gateway
+      ports:
+        - port: 3007
+  egress:
+    - to:
+        - podSelector: {}  # Allow to all pods in namespace
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              app.kubernetes.io/name: kafka
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              app.kubernetes.io/name: elasticsearch
+
+---
+# ============================================================================
+# Ingress for SOAP endpoint
+# ============================================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: legacy-adapter-v2-ingress
+  namespace: ndp
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    # Rate limiting at ingress level
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    nginx.ingress.kubernetes.io/limit-connections: "50"
+spec:
+  tls:
+    - hosts:
+        - soap.ndp.egypt.gov.eg
+        - legacy.ndp.egypt.gov.eg
+      secretName: legacy-adapter-tls
+  rules:
+    - host: soap.ndp.egypt.gov.eg
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: legacy-adapter-v2
+                port:
+                  number: 3007
+    - host: legacy.ndp.egypt.gov.eg
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: legacy-adapter-v2
+                port:
+                  number: 3007
+
+---
+# ============================================================================
+# Kafka Topics for Legacy Adapter
+# ============================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: legacy-adapter-kafka-topics
+  namespace: ndp-kafka
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: create-topics
+          image: confluentinc/cp-kafka:7.5.0
+          command:
+            - sh
+            - -c
+            - |
+              # Wait for Kafka
+              sleep 30
+              
+              # Create legacy adapter topics
+              kafka-topics --bootstrap-server kafka-0.kafka-headless:9092 \
+                --create --if-not-exists \
+                --topic ndp.legacy.prescription.create \
+                --partitions 6 --replication-factor 3
+              
+              kafka-topics --bootstrap-server kafka-0.kafka-headless:9092 \
+                --create --if-not-exists \
+                --topic ndp.legacy.prescription.sign \
+                --partitions 6 --replication-factor 3
+              
+              kafka-topics --bootstrap-server kafka-0.kafka-headless:9092 \
+                --create --if-not-exists \
+                --topic ndp.legacy.prescription.cancel \
+                --partitions 3 --replication-factor 3
+              
+              kafka-topics --bootstrap-server kafka-0.kafka-headless:9092 \
+                --create --if-not-exists \
+                --topic ndp.legacy.dispense.record \
+                --partitions 6 --replication-factor 3
+              
+              echo "Legacy adapter topics created"
