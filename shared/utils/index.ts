@@ -7,6 +7,23 @@ import { EgyptianConstants } from '../config/index.js';
 import { NDPError, ErrorCodes } from '../types/ndp.types.js';
 
 // ============================================================================
+// Re-export Event Streaming and Audit utilities
+// These modules require KAFKA_BROKERS and ELASTICSEARCH_URL env vars
+// ============================================================================
+
+// Re-export all modules (uncomment when dependencies are installed)
+export * from '../kafka/index.js';
+export * from '../elasticsearch/index.js';
+export * from '../database/index.js';
+export * from '../metrics/index.js';
+
+// Legacy exports (can be removed after migration)
+// export * from './kafka.js';
+// export * from './elasticsearch.js';
+// export * from './audit-mediator.js';
+// export * from './kafka-workers.js';
+
+// ============================================================================
 // Logger
 // ============================================================================
 

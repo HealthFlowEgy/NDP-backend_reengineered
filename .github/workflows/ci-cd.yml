@@ -1,0 +1,324 @@
+name: NDP Backend CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*']
+  pull_request:
+    branches: [main, develop]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: healthflow/ndp
+
+jobs:
+  # ============================================================================
+  # Lint and Test
+  # ============================================================================
+  lint-and-test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linting
+        run: npm run lint
+
+      - name: Run type checking
+        run: npm run typecheck
+
+      - name: Run unit tests
+        run: npm run test:unit
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage/lcov.info
+          fail_ci_if_error: false
+
+  # ============================================================================
+  # Build Services
+  # ============================================================================
+  build:
+    name: Build ${{ matrix.service }}
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service:
+          - api-gateway
+          - prescription-service
+          - dispense-service
+          - medication-directory
+          - auth-service
+          - signing-service
+          - ai-validation-service
+          - legacy-adapter
+          - notification-service
+          - regulator-service
+          - reporting-service
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./infrastructure/docker/Dockerfile.service
+          build-args: |
+            SERVICE_NAME=${{ matrix.service }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ============================================================================
+  # Integration Tests
+  # ============================================================================
+  integration-tests:
+    name: Integration Tests
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: ndp
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: ndp_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run database migrations
+        run: |
+          PGPASSWORD=testpassword psql -h localhost -U ndp -d ndp_test \
+            -f infrastructure/scripts/001_initial_schema.sql
+        env:
+          PGPASSWORD: testpassword
+
+      - name: Run integration tests
+        run: npm run test:integration
+        env:
+          DATABASE_URL: postgresql://ndp:testpassword@localhost:5432/ndp_test
+          REDIS_URL: redis://localhost:6379
+          NODE_ENV: test
+
+  # ============================================================================
+  # Security Scan
+  # ============================================================================
+  security-scan:
+    name: Security Scan
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # ============================================================================
+  # Deploy to Staging
+  # ============================================================================
+  deploy-staging:
+    name: Deploy to Staging
+    needs: [build, integration-tests]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop'
+    environment:
+      name: staging
+      url: https://staging-api.ndp.egypt.gov.eg
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.STAGING_KUBECONFIG }}" | base64 -d > kubeconfig
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> $GITHUB_ENV
+
+      - name: Deploy to staging
+        run: |
+          # Update image tags
+          cd infrastructure/k8s
+          
+          # Apply configurations
+          kubectl apply -f 00-namespace.yaml
+          kubectl apply -f 01-database.yaml
+          kubectl apply -f 02-api-gateway.yaml
+          kubectl apply -f 03-core-services.yaml
+          kubectl apply -f 04-security-services.yaml
+          kubectl apply -f 05-supporting-services.yaml
+          
+          # Restart deployments with new images
+          kubectl -n ndp rollout restart deployment --all
+          
+          # Wait for rollout
+          kubectl -n ndp rollout status deployment/api-gateway --timeout=300s
+
+      - name: Run smoke tests
+        run: |
+          sleep 30
+          curl -f https://staging-api.ndp.egypt.gov.eg/health || exit 1
+
+  # ============================================================================
+  # Deploy to Production
+  # ============================================================================
+  deploy-production:
+    name: Deploy to Production
+    needs: [build, integration-tests, security-scan]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: production
+      url: https://api.ndp.egypt.gov.eg
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.PROD_KUBECONFIG }}" | base64 -d > kubeconfig
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> $GITHUB_ENV
+
+      - name: Deploy to production
+        run: |
+          cd infrastructure/k8s
+          
+          # Apply configurations with production values
+          kubectl apply -f 00-namespace.yaml
+          kubectl apply -f 01-database.yaml
+          kubectl apply -f 02-api-gateway.yaml
+          kubectl apply -f 03-core-services.yaml
+          kubectl apply -f 04-security-services.yaml
+          kubectl apply -f 05-supporting-services.yaml
+          kubectl apply -f 06-networking.yaml
+          
+          # Update images to tagged version
+          VERSION=${GITHUB_REF#refs/tags/}
+          for deployment in api-gateway prescription-service dispense-service medication-directory \
+            auth-service signing-service ai-validation-service legacy-adapter \
+            notification-service regulator-service reporting-service; do
+            kubectl -n ndp set image deployment/$deployment \
+              $deployment=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-$deployment:$VERSION
+          done
+          
+          # Wait for rollouts
+          kubectl -n ndp rollout status deployment/api-gateway --timeout=600s
+          kubectl -n ndp rollout status deployment/prescription-service --timeout=600s
+
+      - name: Run production smoke tests
+        run: |
+          sleep 60
+          curl -f https://api.ndp.egypt.gov.eg/health || exit 1
+          curl -f https://api.ndp.egypt.gov.eg/fhir/metadata || exit 1
+
+      - name: Notify deployment success
+        uses: slackapi/slack-github-action@v1
+        if: success()
+        with:
+          payload: |
+            {
+              "text": "✅ NDP Backend ${{ github.ref_name }} deployed to production successfully!"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+
+      - name: Notify deployment failure
+        uses: slackapi/slack-github-action@v1
+        if: failure()
+        with:
+          payload: |
+            {
+              "text": "❌ NDP Backend ${{ github.ref_name }} production deployment FAILED!"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}

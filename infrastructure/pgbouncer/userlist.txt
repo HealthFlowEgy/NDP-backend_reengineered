@@ -1,0 +1,16 @@
+; PgBouncer User List
+; Format: "username" "password"
+; Password should be MD5 hash: md5 + md5(password + username)
+; Generate with: echo -n "md5$(echo -n 'password'username | md5sum | cut -d' ' -f1)"
+
+; Main application user (replace password in production)
+"ndp" "SCRAM-SHA-256$4096:salt$storedKey:serverKey"
+
+; Read-only user for replicas
+"ndp_readonly" "SCRAM-SHA-256$4096:salt$storedKey:serverKey"
+
+; Admin user for PgBouncer management
+"pgbouncer_admin" "SCRAM-SHA-256$4096:salt$storedKey:serverKey"
+
+; Stats user for monitoring
+"pgbouncer_stats" "SCRAM-SHA-256$4096:salt$storedKey:serverKey"

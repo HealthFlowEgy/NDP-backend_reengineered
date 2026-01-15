@@ -1,0 +1,317 @@
+# ============================================================================
+# Apache Kafka Cluster for NDP Event Streaming
+# 3-broker cluster with Zookeeper
+# ============================================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ndp-kafka
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/part-of: ndp
+---
+# Zookeeper Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper
+  namespace: ndp-kafka
+  labels:
+    app.kubernetes.io/name: zookeeper
+spec:
+  type: ClusterIP
+  ports:
+    - port: 2181
+      targetPort: 2181
+      name: client
+    - port: 2888
+      targetPort: 2888
+      name: peer
+    - port: 3888
+      targetPort: 3888
+      name: leader-election
+  selector:
+    app.kubernetes.io/name: zookeeper
+---
+# Zookeeper StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: zookeeper
+  namespace: ndp-kafka
+  labels:
+    app.kubernetes.io/name: zookeeper
+spec:
+  serviceName: zookeeper
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: zookeeper
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zookeeper
+    spec:
+      containers:
+        - name: zookeeper
+          image: confluentinc/cp-zookeeper:7.5.0
+          ports:
+            - containerPort: 2181
+              name: client
+            - containerPort: 2888
+              name: peer
+            - containerPort: 3888
+              name: leader-election
+          env:
+            - name: ZOOKEEPER_CLIENT_PORT
+              value: "2181"
+            - name: ZOOKEEPER_TICK_TIME
+              value: "2000"
+            - name: ZOOKEEPER_INIT_LIMIT
+              value: "5"
+            - name: ZOOKEEPER_SYNC_LIMIT
+              value: "2"
+            - name: ZOOKEEPER_SERVERS
+              value: "zookeeper-0.zookeeper:2888:3888;zookeeper-1.zookeeper:2888:3888;zookeeper-2.zookeeper:2888:3888"
+            - name: ZOOKEEPER_SERVER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          command:
+            - sh
+            - -c
+            - |
+              export ZOOKEEPER_SERVER_ID=$((${HOSTNAME##*-}+1))
+              exec /etc/confluent/docker/run
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/zookeeper/data
+            - name: log
+              mountPath: /var/lib/zookeeper/log
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+    - metadata:
+        name: log
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi
+---
+# Kafka Headless Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  namespace: ndp-kafka
+  labels:
+    app.kubernetes.io/name: kafka
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - port: 9092
+      targetPort: 9092
+      name: plaintext
+    - port: 9093
+      targetPort: 9093
+      name: internal
+  selector:
+    app.kubernetes.io/name: kafka
+---
+# Kafka Service (for external access)
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: ndp-kafka
+  labels:
+    app.kubernetes.io/name: kafka
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9092
+      targetPort: 9092
+      name: plaintext
+  selector:
+    app.kubernetes.io/name: kafka
+---
+# Kafka StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: ndp-kafka
+  labels:
+    app.kubernetes.io/name: kafka
+spec:
+  serviceName: kafka-headless
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kafka
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app.kubernetes.io/name
+                      operator: In
+                      values:
+                        - kafka
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: kafka
+          image: confluentinc/cp-kafka:7.5.0
+          ports:
+            - containerPort: 9092
+              name: plaintext
+            - containerPort: 9093
+              name: internal
+          env:
+            - name: KAFKA_BROKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: KAFKA_ZOOKEEPER_CONNECT
+              value: "zookeeper-0.zookeeper:2181,zookeeper-1.zookeeper:2181,zookeeper-2.zookeeper:2181"
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: "PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT"
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: "INTERNAL"
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "3"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "3"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "2"
+            - name: KAFKA_DEFAULT_REPLICATION_FACTOR
+              value: "3"
+            - name: KAFKA_MIN_INSYNC_REPLICAS
+              value: "2"
+            - name: KAFKA_NUM_PARTITIONS
+              value: "6"
+            - name: KAFKA_LOG_RETENTION_HOURS
+              value: "168"
+            - name: KAFKA_LOG_RETENTION_BYTES
+              value: "10737418240"
+            - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+              value: "true"
+            - name: KAFKA_DELETE_TOPIC_ENABLE
+              value: "true"
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xmx2g -Xms2g"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          command:
+            - sh
+            - -c
+            - |
+              export KAFKA_BROKER_ID=$((${HOSTNAME##*-}))
+              export KAFKA_ADVERTISED_LISTENERS="PLAINTEXT://${POD_NAME}.kafka-headless.ndp-kafka.svc.cluster.local:9092,INTERNAL://${POD_NAME}.kafka-headless.ndp-kafka.svc.cluster.local:9093"
+              exec /etc/confluent/docker/run
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "2Gi"
+            limits:
+              cpu: "2000m"
+              memory: "4Gi"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kafka/data
+          livenessProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 60
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 30
+            periodSeconds: 5
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 50Gi
+---
+# Kafka UI (optional, for monitoring)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-ui
+  namespace: ndp-kafka
+  labels:
+    app.kubernetes.io/name: kafka-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kafka-ui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka-ui
+    spec:
+      containers:
+        - name: kafka-ui
+          image: provectuslabs/kafka-ui:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: KAFKA_CLUSTERS_0_NAME
+              value: "ndp-kafka"
+            - name: KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS
+              value: "kafka-0.kafka-headless.ndp-kafka.svc.cluster.local:9092,kafka-1.kafka-headless.ndp-kafka.svc.cluster.local:9092,kafka-2.kafka-headless.ndp-kafka.svc.cluster.local:9092"
+            - name: KAFKA_CLUSTERS_0_ZOOKEEPER
+              value: "zookeeper-0.zookeeper:2181"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-ui
+  namespace: ndp-kafka
+  labels:
+    app.kubernetes.io/name: kafka-ui
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+  selector:
+    app.kubernetes.io/name: kafka-ui

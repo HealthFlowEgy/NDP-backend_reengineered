@@ -1,0 +1,237 @@
+# ============================================================================
+# PgBouncer Connection Pooler for NDP Database
+# Supports 10,000+ concurrent connections
+# ============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pgbouncer-config
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: pgbouncer
+data:
+  pgbouncer.ini: |
+    [databases]
+    ndp = host=postgresql port=5432 dbname=ndp auth_user=ndp
+    ndp_readonly = host=postgresql-replica port=5432 dbname=ndp auth_user=ndp_readonly
+    
+    [pgbouncer]
+    listen_addr = 0.0.0.0
+    listen_port = 6432
+    auth_type = md5
+    auth_file = /etc/pgbouncer/userlist.txt
+    
+    ; Pool mode: transaction is best for web applications
+    pool_mode = transaction
+    
+    ; Connection limits
+    max_client_conn = 10000
+    default_pool_size = 100
+    min_pool_size = 10
+    reserve_pool_size = 25
+    reserve_pool_timeout = 5
+    max_db_connections = 500
+    max_user_connections = 200
+    
+    ; Timeouts
+    server_idle_timeout = 600
+    client_idle_timeout = 3600
+    query_timeout = 120
+    query_wait_timeout = 120
+    server_lifetime = 3600
+    server_connect_timeout = 15
+    client_login_timeout = 60
+    
+    ; Logging
+    log_connections = 1
+    log_disconnections = 1
+    log_pooler_errors = 1
+    stats_period = 60
+    
+    ; Admin
+    admin_users = pgbouncer_admin
+    stats_users = pgbouncer_stats
+    
+    ; TCP
+    tcp_keepalive = 1
+    tcp_keepidle = 30
+    tcp_keepintvl = 10
+    tcp_keepcnt = 3
+    
+    ; Application name tracking
+    application_name_add_host = 1
+    
+    ; DNS
+    dns_max_ttl = 300
+    dns_nxdomain_ttl = 15
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pgbouncer-users
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: pgbouncer
+type: Opaque
+stringData:
+  userlist.txt: |
+    "ndp" "SCRAM-SHA-256$4096:CHANGE_ME"
+    "ndp_readonly" "SCRAM-SHA-256$4096:CHANGE_ME"
+    "pgbouncer_admin" "SCRAM-SHA-256$4096:CHANGE_ME"
+    "pgbouncer_stats" "SCRAM-SHA-256$4096:CHANGE_ME"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgbouncer
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: pgbouncer
+    app.kubernetes.io/component: database-proxy
+spec:
+  type: ClusterIP
+  ports:
+    - port: 6432
+      targetPort: 6432
+      name: pgbouncer
+  selector:
+    app.kubernetes.io/name: pgbouncer
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgbouncer
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: pgbouncer
+    app.kubernetes.io/component: database-proxy
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pgbouncer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pgbouncer
+        app.kubernetes.io/component: database-proxy
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9127"
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app.kubernetes.io/name
+                      operator: In
+                      values:
+                        - pgbouncer
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: pgbouncer
+          image: edoburu/pgbouncer:1.21.0
+          ports:
+            - containerPort: 6432
+              name: pgbouncer
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://ndp:$(DB_PASSWORD)@postgresql:5432/ndp"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ndp-secrets
+                  key: DB_PASSWORD
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/pgbouncer/pgbouncer.ini
+              subPath: pgbouncer.ini
+            - name: users
+              mountPath: /etc/pgbouncer/userlist.txt
+              subPath: userlist.txt
+          livenessProbe:
+            tcpSocket:
+              port: 6432
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: 6432
+            initialDelaySeconds: 5
+            periodSeconds: 5
+        # PgBouncer Exporter for Prometheus metrics
+        - name: pgbouncer-exporter
+          image: prometheuscommunity/pgbouncer-exporter:v0.7.0
+          ports:
+            - containerPort: 9127
+              name: metrics
+          env:
+            - name: PGBOUNCER_EXPORTER_HOST
+              value: "localhost"
+            - name: PGBOUNCER_EXPORTER_PORT
+              value: "6432"
+            - name: PGBOUNCER_EXPORTER_USER
+              value: "pgbouncer_stats"
+            - name: PGBOUNCER_EXPORTER_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: ndp-secrets
+                  key: DB_PASSWORD
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "32Mi"
+            limits:
+              cpu: "100m"
+              memory: "64Mi"
+      volumes:
+        - name: config
+          configMap:
+            name: pgbouncer-config
+        - name: users
+          secret:
+            secretName: pgbouncer-users
+---
+# PodDisruptionBudget for high availability
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pgbouncer-pdb
+  namespace: ndp
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pgbouncer
+---
+# HorizontalPodAutoscaler
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: pgbouncer-hpa
+  namespace: ndp
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: pgbouncer
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

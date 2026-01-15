@@ -14,13 +14,24 @@
     "dev:dispense": "npm run dev --workspace=services/dispense-service",
     "dev:medication": "npm run dev --workspace=services/medication-directory",
     "dev:gateway": "npm run dev --workspace=services/api-gateway",
+    "dev:all": "docker-compose up -d && concurrently \"npm run dev --workspace=services/*\"",
     "test": "npm run test --workspaces",
     "lint": "eslint . --ext .ts",
     "db:migrate": "npm run db:migrate --workspace=services/prescription-service",
     "db:seed": "npm run db:seed --workspace=services/medication-directory",
     "docker:build": "docker-compose build",
     "docker:up": "docker-compose up -d",
-    "docker:down": "docker-compose down"
+    "docker:down": "docker-compose down",
+    "docker:full": "docker-compose -f docker-compose.full.yml up -d",
+    "docker:kafka": "docker-compose -f docker-compose.full.yml --profile with-kafka up -d",
+    "docker:elastic": "docker-compose -f docker-compose.full.yml --profile with-elasticsearch up -d",
+    "workers:start": "ts-node shared/utils/kafka-workers.ts",
+    "k8s:apply": "kubectl apply -f infrastructure/k8s/",
+    "k8s:delete": "kubectl delete -f infrastructure/k8s/"
+  },
+  "dependencies": {
+    "kafkajs": "^2.2.4",
+    "@elastic/elasticsearch": "^8.11.0"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
@@ -28,7 +39,8 @@
     "typescript": "^5.3.0",
     "eslint": "^8.55.0",
     "@typescript-eslint/eslint-plugin": "^6.13.0",
-    "@typescript-eslint/parser": "^6.13.0"
+    "@typescript-eslint/parser": "^6.13.0",
+    "ts-node": "^10.9.2"
   },
   "engines": {
     "node": ">=18.0.0"

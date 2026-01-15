@@ -95,7 +95,10 @@ The National Digital Prescription (NDP) Platform is Egypt's unified digital infr
 | **Language** | TypeScript 5.3 |
 | **Framework** | Express.js |
 | **Database** | PostgreSQL 15 |
+| **Connection Pool** | PgBouncer (10,000+ connections) |
 | **Cache** | Redis 7 |
+| **Event Streaming** | Apache Kafka |
+| **Audit Logs** | Elasticsearch + Kibana |
 | **Auth** | Keycloak + Sunbird RC |
 | **Container** | Docker |
 | **Orchestration** | Kubernetes |

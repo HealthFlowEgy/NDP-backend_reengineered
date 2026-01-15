@@ -1,0 +1,525 @@
+# ============================================================================
+# NDP Backend - Complete Docker Compose
+# Includes all services, Kafka, Elasticsearch, PgBouncer
+# ============================================================================
+
+version: '3.8'
+
+services:
+  # ============================================================================
+  # Infrastructure Services
+  # ============================================================================
+  
+  postgres:
+    image: postgres:15-alpine
+    container_name: ndp-postgres
+    environment:
+      POSTGRES_USER: ndp
+      POSTGRES_PASSWORD: ndp_dev_password
+      POSTGRES_DB: ndp
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/scripts/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_initial_schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ndp -d ndp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ndp-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: ndp-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ndp-network
+
+  # ============================================================================
+  # PgBouncer - Connection Pooling
+  # ============================================================================
+  
+  pgbouncer:
+    image: edoburu/pgbouncer:1.21.0
+    container_name: ndp-pgbouncer
+    environment:
+      DATABASE_URL: postgresql://ndp:ndp_dev_password@postgres:5432/ndp
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 1000
+      DEFAULT_POOL_SIZE: 50
+    ports:
+      - "6432:6432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ndp-network
+
+  # ============================================================================
+  # Kafka - Event Streaming
+  # ============================================================================
+  
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: ndp-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+    networks:
+      - ndp-network
+    profiles:
+      - with-kafka
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: ndp-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_DELETE_TOPIC_ENABLE: "true"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - ndp-network
+    profiles:
+      - with-kafka
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: ndp-kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: ndp-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    networks:
+      - ndp-network
+    profiles:
+      - with-kafka
+
+  # ============================================================================
+  # Elasticsearch - Audit Logging
+  # ============================================================================
+  
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: ndp-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+      - xpack.security.enabled=false
+      - cluster.name=ndp-audit
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - ndp-network
+    profiles:
+      - with-elasticsearch
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: ndp-kibana
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    networks:
+      - ndp-network
+    profiles:
+      - with-elasticsearch
+
+  # ============================================================================
+  # Keycloak - Identity Management
+  # ============================================================================
+  
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0
+    container_name: ndp-keycloak
+    command: start-dev --import-realm
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/ndp
+      KC_DB_USERNAME: ndp
+      KC_DB_PASSWORD: ndp_dev_password
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./infrastructure/keycloak/ndp-realm.json:/opt/keycloak/data/import/ndp-realm.json
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ndp-network
+    profiles:
+      - with-keycloak
+
+  # ============================================================================
+  # Application Services
+  # ============================================================================
+  
+  api-gateway:
+    build:
+      context: .
+      dockerfile: ./infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: api-gateway
+    container_name: ndp-api-gateway
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      LOG_LEVEL: info
+      PRESCRIPTION_SERVICE_URL: http://prescription-service:3001
+      DISPENSE_SERVICE_URL: http://dispense-service:3002
+      MEDICATION_SERVICE_URL: http://medication-directory:3003
+      AUTH_SERVICE_URL: http://auth-service:3004
+      SIGNING_SERVICE_URL: http://signing-service:3005
+      AI_VALIDATION_SERVICE_URL: http://ai-validation-service:3006
+      LEGACY_ADAPTER_URL: http://legacy-adapter:3007
+      NOTIFICATION_SERVICE_URL: http://notification-service:3008
+      REGULATOR_SERVICE_URL: http://regulator-service:3009
+      REPORTING_SERVICE_URL: http://reporting-service:3010
+    ports:
+      - "3000:3000"
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ndp-network
+
+  prescription-service:
+    build:
+      context: .
+      dockerfile: ./infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: prescription-service
+    container_name: ndp-prescription-service
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      LOG_LEVEL: info
+      DB_HOST: pgbouncer
+      DB_PORT: 6432
+      DB_USER: ndp
+      DB_PASSWORD: ndp_dev_password
+      DB_NAME: ndp
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BROKERS: kafka:9092
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    ports:
+      - "3001:3001"
+    depends_on:
+      - pgbouncer
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ndp-network
+
+  dispense-service:
+    build:
+      context: .
+      dockerfile: ./infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: dispense-service
+    container_name: ndp-dispense-service
+    environment:
+      NODE_ENV: development
+      PORT: 3002
+      LOG_LEVEL: info
+      DB_HOST: pgbouncer
+      DB_PORT: 6432
+      DB_USER: ndp
+      DB_PASSWORD: ndp_dev_password
+      DB_NAME: ndp
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BROKERS: kafka:9092
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    ports:
+      - "3002:3002"
+    depends_on:
+      - pgbouncer
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ndp-network
+
+  medication-directory:
+    build:
+      context: .
+      dockerfile: ./infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: medication-directory
+    container_name: ndp-medication-directory
+    environment:
+      NODE_ENV: development
+      PORT: 3003
+      LOG_LEVEL: info
+      DB_HOST: pgbouncer
+      DB_PORT: 6432
+      DB_USER: ndp
+      DB_PASSWORD: ndp_dev_password
+      DB_NAME: ndp
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3003:3003"
+    depends_on:
+      - pgbouncer
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ndp-network
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: ./infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: auth-service
+    container_name: ndp-auth-service
+    environment:
+      NODE_ENV: development
+      PORT: 3004
+      LOG_LEVEL: info
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ndp
+      SUNBIRD_RC_URL: http://sunbird-rc:8081
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3004:3004"
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ndp-network
+
+  signing-service:
+    build:
+      context: .
+      dockerfile: ./infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: signing-service
+    container_name: ndp-signing-service
+    environment:
+      NODE_ENV: development
+      PORT: 3005
+      LOG_LEVEL: info
+    ports:
+      - "3005:3005"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ndp-network
+
+  ai-validation-service:
+    build:
+      context: .
+      dockerfile: ./infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: ai-validation-service
+    container_name: ndp-ai-validation-service
+    environment:
+      NODE_ENV: development
+      PORT: 3006
+      LOG_LEVEL: info
+      AI_ENGINE_URL: http://67.207.74.0
+      AI_ENGINE_TIMEOUT: 10000
+    ports:
+      - "3006:3006"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ndp-network
+
+  legacy-adapter:
+    build:
+      context: .
+      dockerfile: ./infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: legacy-adapter
+    container_name: ndp-legacy-adapter
+    environment:
+      NODE_ENV: development
+      PORT: 3007
+      LOG_LEVEL: info
+      PRESCRIPTION_SERVICE_URL: http://prescription-service:3001
+      DISPENSE_SERVICE_URL: http://dispense-service:3002
+      MEDICATION_SERVICE_URL: http://medication-directory:3003
+      AUTH_SERVICE_URL: http://auth-service:3004
+    ports:
+      - "3007:3007"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3007/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ndp-network
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: ./infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: notification-service
+    container_name: ndp-notification-service
+    environment:
+      NODE_ENV: development
+      PORT: 3008
+      LOG_LEVEL: info
+      SMS_ENABLED: "false"
+      EMAIL_ENABLED: "false"
+      WHATSAPP_ENABLED: "false"
+      PUSH_ENABLED: "false"
+      KAFKA_BROKERS: kafka:9092
+    ports:
+      - "3008:3008"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3008/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ndp-network
+
+  regulator-service:
+    build:
+      context: .
+      dockerfile: ./infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: regulator-service
+    container_name: ndp-regulator-service
+    environment:
+      NODE_ENV: development
+      PORT: 3009
+      LOG_LEVEL: info
+      PRESCRIPTION_SERVICE_URL: http://prescription-service:3001
+      DISPENSE_SERVICE_URL: http://dispense-service:3002
+      MEDICATION_SERVICE_URL: http://medication-directory:3003
+      NOTIFICATION_SERVICE_URL: http://notification-service:3008
+      KAFKA_BROKERS: kafka:9092
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    ports:
+      - "3009:3009"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3009/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ndp-network
+
+  reporting-service:
+    build:
+      context: .
+      dockerfile: ./infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: reporting-service
+    container_name: ndp-reporting-service
+    environment:
+      NODE_ENV: development
+      PORT: 3010
+      LOG_LEVEL: info
+      PRESCRIPTION_SERVICE_URL: http://prescription-service:3001
+      DISPENSE_SERVICE_URL: http://dispense-service:3002
+      MEDICATION_SERVICE_URL: http://medication-directory:3003
+      REGULATOR_SERVICE_URL: http://regulator-service:3009
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    ports:
+      - "3010:3010"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3010/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ndp-network
+
+# ============================================================================
+# Networks
+# ============================================================================
+
+networks:
+  ndp-network:
+    driver: bridge
+
+# ============================================================================
+# Volumes
+# ============================================================================
+
+volumes:
+  postgres_data:
+  redis_data:
+  zookeeper_data:
+  zookeeper_log:
+  kafka_data:
+  elasticsearch_data:
