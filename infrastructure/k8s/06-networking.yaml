@@ -1,0 +1,233 @@
+# Ingress Controller Configuration
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ndp-ingress
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: ndp-ingress
+    app.kubernetes.io/component: networking
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      add_header X-Frame-Options "SAMEORIGIN" always;
+      add_header X-Content-Type-Options "nosniff" always;
+      add_header X-XSS-Protection "1; mode=block" always;
+      add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+spec:
+  tls:
+    - hosts:
+        - api.ndp.egypt.gov.eg
+        - soap.ndp.egypt.gov.eg
+      secretName: ndp-tls-cert
+  rules:
+    # Main API endpoint
+    - host: api.ndp.egypt.gov.eg
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway
+                port:
+                  number: 3000
+    # Legacy SOAP endpoint
+    - host: soap.ndp.egypt.gov.eg
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: legacy-adapter
+                port:
+                  number: 3007
+---
+# Internal Ingress for Regulator Portal
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ndp-regulator-ingress
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: ndp-regulator-ingress
+    app.kubernetes.io/component: networking
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/whitelist-source-range: "10.0.0.0/8,172.16.0.0/12"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  tls:
+    - hosts:
+        - regulator.ndp.egypt.gov.eg
+      secretName: ndp-regulator-tls-cert
+  rules:
+    - host: regulator.ndp.egypt.gov.eg
+      http:
+        paths:
+          - path: /api/regulator
+            pathType: Prefix
+            backend:
+              service:
+                name: regulator-service
+                port:
+                  number: 3009
+          - path: /api/reports
+            pathType: Prefix
+            backend:
+              service:
+                name: reporting-service
+                port:
+                  number: 3010
+---
+# Network Policy - Default Deny
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: ndp
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# Network Policy - Allow DNS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: ndp
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# Network Policy - API Gateway Ingress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-gateway-ingress
+  namespace: ndp
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: api-gateway
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 3000
+---
+# Network Policy - API Gateway to Services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-gateway-egress
+  namespace: ndp
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: api-gateway
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: service
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: security
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: ai
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: notification
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: regulator
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: reporting
+---
+# Network Policy - Services to Database
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-services-to-database
+  namespace: ndp
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: service
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgresql
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+---
+# Network Policy - Database Ingress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-database-ingress
+  namespace: ndp
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: database
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: service
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: security
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: regulator
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: reporting
+      ports:
+        - protocol: TCP
+          port: 5432

@@ -1,0 +1,309 @@
+# Legacy Adapter Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: legacy-adapter
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: legacy-adapter
+    app.kubernetes.io/component: adapter
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3007
+      targetPort: 3007
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: legacy-adapter
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: legacy-adapter
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: legacy-adapter
+    app.kubernetes.io/component: adapter
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: legacy-adapter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: legacy-adapter
+        app.kubernetes.io/component: adapter
+    spec:
+      serviceAccountName: ndp-service-account
+      containers:
+        - name: legacy-adapter
+          image: ghcr.io/healthflow/ndp-legacy-adapter:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3007
+              name: http
+          envFrom:
+            - configMapRef:
+                name: ndp-common-config
+          env:
+            - name: PORT
+              value: "3007"
+            - name: SERVICE_NAME
+              value: "legacy-adapter"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3007
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3007
+            initialDelaySeconds: 10
+            periodSeconds: 5
+---
+# Notification Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-service
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: notification-service
+    app.kubernetes.io/component: notification
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3008
+      targetPort: 3008
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: notification-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: notification-service
+    app.kubernetes.io/component: notification
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notification-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: notification-service
+        app.kubernetes.io/component: notification
+    spec:
+      serviceAccountName: ndp-service-account
+      containers:
+        - name: notification-service
+          image: ghcr.io/healthflow/ndp-notification-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3008
+              name: http
+          envFrom:
+            - configMapRef:
+                name: ndp-common-config
+            - secretRef:
+                name: ndp-secrets
+          env:
+            - name: PORT
+              value: "3008"
+            - name: SERVICE_NAME
+              value: "notification-service"
+            - name: SMS_ENABLED
+              value: "true"
+            - name: EMAIL_ENABLED
+              value: "true"
+            - name: WHATSAPP_ENABLED
+              value: "true"
+            - name: PUSH_ENABLED
+              value: "true"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3008
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3008
+            initialDelaySeconds: 10
+            periodSeconds: 5
+---
+# Regulator Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: regulator-service
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: regulator-service
+    app.kubernetes.io/component: regulator
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3009
+      targetPort: 3009
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: regulator-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: regulator-service
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: regulator-service
+    app.kubernetes.io/component: regulator
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: regulator-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: regulator-service
+        app.kubernetes.io/component: regulator
+    spec:
+      serviceAccountName: ndp-service-account
+      containers:
+        - name: regulator-service
+          image: ghcr.io/healthflow/ndp-regulator-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3009
+              name: http
+          envFrom:
+            - configMapRef:
+                name: ndp-common-config
+            - secretRef:
+                name: ndp-secrets
+          env:
+            - name: PORT
+              value: "3009"
+            - name: SERVICE_NAME
+              value: "regulator-service"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3009
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3009
+            initialDelaySeconds: 10
+            periodSeconds: 5
+---
+# Reporting Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: reporting-service
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: reporting-service
+    app.kubernetes.io/component: reporting
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3010
+      targetPort: 3010
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: reporting-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reporting-service
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: reporting-service
+    app.kubernetes.io/component: reporting
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: reporting-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: reporting-service
+        app.kubernetes.io/component: reporting
+    spec:
+      serviceAccountName: ndp-service-account
+      containers:
+        - name: reporting-service
+          image: ghcr.io/healthflow/ndp-reporting-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3010
+              name: http
+          envFrom:
+            - configMapRef:
+                name: ndp-common-config
+            - secretRef:
+                name: ndp-secrets
+          env:
+            - name: PORT
+              value: "3010"
+            - name: SERVICE_NAME
+              value: "reporting-service"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "1Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3010
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3010
+            initialDelaySeconds: 10
+            periodSeconds: 5

@@ -1,0 +1,273 @@
+# ============================================================================
+# NDP Backend - Helm Values (Production)
+# ============================================================================
+
+global:
+  imageRegistry: ghcr.io/healthflow
+  imagePullPolicy: Always
+  storageClass: standard
+  
+  # Common labels
+  labels:
+    app.kubernetes.io/part-of: ndp
+    environment: production
+
+# ============================================================================
+# Database Configuration
+# ============================================================================
+postgresql:
+  enabled: true
+  auth:
+    username: ndp
+    database: ndp
+    existingSecret: ndp-secrets
+    secretKeys:
+      adminPasswordKey: DB_PASSWORD
+      userPasswordKey: DB_PASSWORD
+  primary:
+    persistence:
+      enabled: true
+      size: 100Gi
+      storageClass: ssd
+    resources:
+      requests:
+        cpu: "1000m"
+        memory: "2Gi"
+      limits:
+        cpu: "4000m"
+        memory: "8Gi"
+  metrics:
+    enabled: true
+
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: true
+      size: 10Gi
+    resources:
+      requests:
+        cpu: "250m"
+        memory: "256Mi"
+      limits:
+        cpu: "1000m"
+        memory: "1Gi"
+
+# ============================================================================
+# Service Configurations
+# ============================================================================
+services:
+  api-gateway:
+    replicaCount: 3
+    port: 3000
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "512Mi"
+      limits:
+        cpu: "2000m"
+        memory: "1Gi"
+    autoscaling:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 20
+      targetCPUUtilization: 70
+    ingress:
+      enabled: true
+      hostname: api.ndp.egypt.gov.eg
+      tls: true
+
+  prescription-service:
+    replicaCount: 5
+    port: 3001
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "512Mi"
+      limits:
+        cpu: "2000m"
+        memory: "1Gi"
+    autoscaling:
+      enabled: true
+      minReplicas: 5
+      maxReplicas: 30
+      targetCPUUtilization: 70
+
+  dispense-service:
+    replicaCount: 5
+    port: 3002
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "512Mi"
+      limits:
+        cpu: "2000m"
+        memory: "1Gi"
+    autoscaling:
+      enabled: true
+      minReplicas: 5
+      maxReplicas: 30
+      targetCPUUtilization: 70
+
+  medication-directory:
+    replicaCount: 3
+    port: 3003
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+      limits:
+        cpu: "2000m"
+        memory: "2Gi"
+
+  auth-service:
+    replicaCount: 3
+    port: 3004
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "512Mi"
+      limits:
+        cpu: "2000m"
+        memory: "1Gi"
+
+  signing-service:
+    replicaCount: 3
+    port: 3005
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "512Mi"
+      limits:
+        cpu: "2000m"
+        memory: "1Gi"
+
+  ai-validation-service:
+    replicaCount: 3
+    port: 3006
+    resources:
+      requests:
+        cpu: "1000m"
+        memory: "1Gi"
+      limits:
+        cpu: "4000m"
+        memory: "2Gi"
+
+  legacy-adapter:
+    replicaCount: 2
+    port: 3007
+    resources:
+      requests:
+        cpu: "250m"
+        memory: "256Mi"
+      limits:
+        cpu: "1000m"
+        memory: "512Mi"
+    ingress:
+      enabled: true
+      hostname: soap.ndp.egypt.gov.eg
+      tls: true
+
+  notification-service:
+    replicaCount: 3
+    port: 3008
+    resources:
+      requests:
+        cpu: "250m"
+        memory: "256Mi"
+      limits:
+        cpu: "1000m"
+        memory: "512Mi"
+
+  regulator-service:
+    replicaCount: 2
+    port: 3009
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "512Mi"
+      limits:
+        cpu: "2000m"
+        memory: "1Gi"
+    ingress:
+      enabled: true
+      hostname: regulator.ndp.egypt.gov.eg
+      tls: true
+      annotations:
+        nginx.ingress.kubernetes.io/whitelist-source-range: "10.0.0.0/8"
+
+  reporting-service:
+    replicaCount: 2
+    port: 3010
+    resources:
+      requests:
+        cpu: "1000m"
+        memory: "1Gi"
+      limits:
+        cpu: "4000m"
+        memory: "2Gi"
+
+# ============================================================================
+# Ingress Configuration
+# ============================================================================
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/rate-limit: "1000"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+  tls:
+    - secretName: ndp-tls
+      hosts:
+        - api.ndp.egypt.gov.eg
+        - soap.ndp.egypt.gov.eg
+        - regulator.ndp.egypt.gov.eg
+
+# ============================================================================
+# Monitoring
+# ============================================================================
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+  grafana:
+    enabled: true
+    dashboards:
+      enabled: true
+
+# ============================================================================
+# Security
+# ============================================================================
+networkPolicy:
+  enabled: true
+
+podSecurityPolicy:
+  enabled: true
+
+# ============================================================================
+# Environment
+# ============================================================================
+environment:
+  NODE_ENV: production
+  LOG_LEVEL: info
+  TZ: Africa/Cairo
+
+# External services
+externalServices:
+  keycloak:
+    url: http://keycloak:8080
+    realm: ndp
+  sunbirdRc:
+    url: http://sunbird-rc:8081
+  aiEngine:
+    url: http://67.207.74.0
+    timeout: 10000

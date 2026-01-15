@@ -1,0 +1,245 @@
+# Auth Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: auth-service
+    app.kubernetes.io/component: security
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3004
+      targetPort: 3004
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: auth-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: auth-service
+    app.kubernetes.io/component: security
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: auth-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: auth-service
+        app.kubernetes.io/component: security
+    spec:
+      serviceAccountName: ndp-service-account
+      containers:
+        - name: auth-service
+          image: ghcr.io/healthflow/ndp-auth-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3004
+              name: http
+          envFrom:
+            - configMapRef:
+                name: ndp-common-config
+            - secretRef:
+                name: ndp-secrets
+          env:
+            - name: PORT
+              value: "3004"
+            - name: SERVICE_NAME
+              value: "auth-service"
+            - name: SUNBIRD_RC_URL
+              value: "http://sunbird-rc:8081"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3004
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3004
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+---
+# Signing Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: signing-service
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: signing-service
+    app.kubernetes.io/component: security
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3005
+      targetPort: 3005
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: signing-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: signing-service
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: signing-service
+    app.kubernetes.io/component: security
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: signing-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: signing-service
+        app.kubernetes.io/component: security
+    spec:
+      serviceAccountName: ndp-service-account
+      containers:
+        - name: signing-service
+          image: ghcr.io/healthflow/ndp-signing-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3005
+              name: http
+          envFrom:
+            - configMapRef:
+                name: ndp-common-config
+            - secretRef:
+                name: ndp-secrets
+          env:
+            - name: PORT
+              value: "3005"
+            - name: SERVICE_NAME
+              value: "signing-service"
+            # In production, connect to HSM
+            - name: HSM_ENABLED
+              value: "false"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3005
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3005
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+---
+# AI Validation Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-validation-service
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: ai-validation-service
+    app.kubernetes.io/component: ai
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3006
+      targetPort: 3006
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: ai-validation-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-validation-service
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: ai-validation-service
+    app.kubernetes.io/component: ai
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ai-validation-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ai-validation-service
+        app.kubernetes.io/component: ai
+    spec:
+      serviceAccountName: ndp-service-account
+      containers:
+        - name: ai-validation-service
+          image: ghcr.io/healthflow/ndp-ai-validation-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3006
+              name: http
+          envFrom:
+            - configMapRef:
+                name: ndp-common-config
+          env:
+            - name: PORT
+              value: "3006"
+            - name: SERVICE_NAME
+              value: "ai-validation-service"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "1Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3006
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3006
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false

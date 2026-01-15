@@ -1,0 +1,116 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ndp
+  labels:
+    app.kubernetes.io/name: ndp
+    app.kubernetes.io/part-of: national-digital-prescription
+    environment: production
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ndp-common-config
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: ndp
+    app.kubernetes.io/component: config
+data:
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"
+  TZ: "Africa/Cairo"
+  
+  # Service URLs (internal K8s DNS)
+  PRESCRIPTION_SERVICE_URL: "http://prescription-service:3001"
+  DISPENSE_SERVICE_URL: "http://dispense-service:3002"
+  MEDICATION_SERVICE_URL: "http://medication-directory:3003"
+  AUTH_SERVICE_URL: "http://auth-service:3004"
+  SIGNING_SERVICE_URL: "http://signing-service:3005"
+  AI_VALIDATION_SERVICE_URL: "http://ai-validation-service:3006"
+  LEGACY_ADAPTER_URL: "http://legacy-adapter:3007"
+  NOTIFICATION_SERVICE_URL: "http://notification-service:3008"
+  REGULATOR_SERVICE_URL: "http://regulator-service:3009"
+  REPORTING_SERVICE_URL: "http://reporting-service:3010"
+  
+  # Database
+  DB_HOST: "postgresql"
+  DB_PORT: "5432"
+  DB_NAME: "ndp"
+  
+  # Redis
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  
+  # Keycloak
+  KEYCLOAK_URL: "http://keycloak:8080"
+  KEYCLOAK_REALM: "ndp"
+  
+  # External AI Engine
+  AI_ENGINE_URL: "http://67.207.74.0"
+  AI_ENGINE_TIMEOUT: "10000"
+  
+  # CORS
+  CORS_ORIGINS: "https://ndp.egypt.gov.eg,https://portal.ndp.egypt.gov.eg"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ndp-secrets
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: ndp
+    app.kubernetes.io/component: secrets
+type: Opaque
+stringData:
+  # Database credentials (replace in production)
+  DB_USER: "ndp"
+  DB_PASSWORD: "CHANGE_ME_IN_PRODUCTION"
+  
+  # JWT Secret (generate with: openssl rand -base64 64)
+  JWT_SECRET: "CHANGE_ME_GENERATE_SECURE_SECRET"
+  
+  # Keycloak
+  KEYCLOAK_CLIENT_ID: "ndp-backend"
+  KEYCLOAK_CLIENT_SECRET: "CHANGE_ME_IN_PRODUCTION"
+  
+  # Notification credentials
+  SMS_API_KEY: ""
+  SMTP_USER: ""
+  SMTP_PASSWORD: ""
+  WHATSAPP_API_KEY: ""
+  FCM_SERVER_KEY: ""
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ndp-service-account
+  namespace: ndp
+  labels:
+    app.kubernetes.io/name: ndp
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ndp-role
+  namespace: ndp
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ndp-role-binding
+  namespace: ndp
+subjects:
+  - kind: ServiceAccount
+    name: ndp-service-account
+    namespace: ndp
+roleRef:
+  kind: Role
+  name: ndp-role
+  apiGroup: rbac.authorization.k8s.io
