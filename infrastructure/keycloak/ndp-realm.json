@@ -1,0 +1,325 @@
+{
+  "realm": "ndp",
+  "enabled": true,
+  "displayName": "National Digital Prescription Platform",
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "failureFactor": 5,
+  "defaultSignatureAlgorithm": "RS256",
+  "accessTokenLifespan": 3600,
+  "accessTokenLifespanForImplicitFlow": 900,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "offlineSessionIdleTimeout": 2592000,
+  "roles": {
+    "realm": [
+      {
+        "name": "physician",
+        "description": "Healthcare physician / doctor",
+        "composite": false
+      },
+      {
+        "name": "pharmacist",
+        "description": "Licensed pharmacist",
+        "composite": false
+      },
+      {
+        "name": "nurse",
+        "description": "Registered nurse",
+        "composite": false
+      },
+      {
+        "name": "regulator",
+        "description": "EDA regulator",
+        "composite": false
+      },
+      {
+        "name": "admin",
+        "description": "System administrator",
+        "composite": false
+      },
+      {
+        "name": "integrator",
+        "description": "API integrator / system",
+        "composite": false
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "ndp-backend",
+      "name": "NDP Backend Services",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "ndp-backend-secret",
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://localhost:3001/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000",
+        "http://localhost:3001"
+      ],
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "access.token.lifespan": "3600"
+      },
+      "protocolMappers": [
+        {
+          "name": "license-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "license",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "license",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "specialty-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "specialty",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "specialty",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "facility_id-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "facility_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "facility_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "facility_name-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "facility_name",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "facility_name",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "realm-roles-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "roles",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "ndp-portal",
+      "name": "NDP Web Portal",
+      "enabled": true,
+      "publicClient": true,
+      "redirectUris": [
+        "http://localhost:4200/*",
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:4200",
+        "http://localhost:3000"
+      ],
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect"
+    }
+  ],
+  "users": [
+    {
+      "username": "EMS-12345",
+      "email": "dr.ahmed@hospital.eg",
+      "firstName": "Ahmed",
+      "lastName": "Mohamed",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "password123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["physician"],
+      "attributes": {
+        "license": ["EMS-12345"],
+        "specialty": ["Internal Medicine"],
+        "facility_id": ["HOSP-001"],
+        "facility_name": ["Cairo General Hospital"]
+      }
+    },
+    {
+      "username": "EMS-67890",
+      "email": "dr.fatima@hospital.eg",
+      "firstName": "Fatima",
+      "lastName": "Hassan",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "password123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["physician"],
+      "attributes": {
+        "license": ["EMS-67890"],
+        "specialty": ["Pediatrics"],
+        "facility_id": ["HOSP-001"],
+        "facility_name": ["Cairo General Hospital"]
+      }
+    },
+    {
+      "username": "PH-11111",
+      "email": "pharmacist@pharmacy.eg",
+      "firstName": "Omar",
+      "lastName": "Pharmacy",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "password123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["pharmacist"],
+      "attributes": {
+        "license": ["PH-11111"],
+        "facility_id": ["PHARM-001"],
+        "facility_name": ["Central Pharmacy"]
+      }
+    },
+    {
+      "username": "PH-22222",
+      "email": "sara@dispensary.eg",
+      "firstName": "Sara",
+      "lastName": "Dispensary",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "password123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["pharmacist"],
+      "attributes": {
+        "license": ["PH-22222"],
+        "facility_id": ["PHARM-002"],
+        "facility_name": ["Community Dispensary"]
+      }
+    },
+    {
+      "username": "eda-regulator",
+      "email": "regulator@eda.gov.eg",
+      "firstName": "EDA",
+      "lastName": "Regulator",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "password123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["regulator"],
+      "attributes": {
+        "license": ["REG-00001"],
+        "facility_id": ["EDA-HQ"],
+        "facility_name": ["Egyptian Drug Authority"]
+      }
+    },
+    {
+      "username": "admin",
+      "email": "admin@ndp.gov.eg",
+      "firstName": "System",
+      "lastName": "Administrator",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["admin"]
+    }
+  ],
+  "clientScopes": [
+    {
+      "name": "prescription",
+      "description": "Prescription management scopes",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true"
+      },
+      "protocolMappers": []
+    },
+    {
+      "name": "dispense",
+      "description": "Dispense management scopes",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true"
+      },
+      "protocolMappers": []
+    }
+  ],
+  "browserSecurityHeaders": {
+    "contentSecurityPolicy": "frame-src 'self'; frame-ancestors 'self'; object-src 'none';",
+    "xContentTypeOptions": "nosniff",
+    "xFrameOptions": "SAMEORIGIN",
+    "xXSSProtection": "1; mode=block"
+  },
+  "passwordPolicy": "length(8) and specialChars(1) and upperCase(1) and lowerCase(1) and digits(1)"
+}

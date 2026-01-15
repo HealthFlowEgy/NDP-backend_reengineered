@@ -22,6 +22,7 @@ const SERVICES = {
   dispense: process.env['DISPENSE_SERVICE_URL'] || 'http://localhost:3002',
   medication: process.env['MEDICATION_SERVICE_URL'] || 'http://localhost:3003',
   auth: process.env['AUTH_SERVICE_URL'] || 'http://localhost:3004',
+  signing: process.env['SIGNING_SERVICE_URL'] || 'http://localhost:3005',
 };
 
 async function main() {
@@ -166,6 +167,51 @@ async function main() {
     target: SERVICES.medication,
     changeOrigin: true,
     pathRewrite: { '^/api/medications': '/api/medications' },
+  }));
+  
+  // Proxy to Auth Service
+  app.use('/api/auth', createProxyMiddleware({
+    target: SERVICES.auth,
+    changeOrigin: true,
+    pathRewrite: { '^/api/auth': '/api/auth' },
+    onError: (err, req, res) => {
+      logger.error('Proxy error (auth)', err);
+      (res as Response).status(502).json({ error: { code: 'AUTH_UNAVAILABLE', message: 'Auth service unavailable' } });
+    },
+  }));
+  
+  app.use('/api/practitioners', createProxyMiddleware({
+    target: SERVICES.auth,
+    changeOrigin: true,
+    pathRewrite: { '^/api/practitioners': '/api/practitioners' },
+  }));
+  
+  app.use('/.well-known', createProxyMiddleware({
+    target: SERVICES.auth,
+    changeOrigin: true,
+  }));
+  
+  // Proxy to Signing Service
+  app.use('/api/signatures', createProxyMiddleware({
+    target: SERVICES.signing,
+    changeOrigin: true,
+    pathRewrite: { '^/api/signatures': '/api/signatures' },
+    onError: (err, req, res) => {
+      logger.error('Proxy error (signing)', err);
+      (res as Response).status(502).json({ error: { code: 'SIGNING_UNAVAILABLE', message: 'Signing service unavailable' } });
+    },
+  }));
+  
+  app.use('/api/certificates', createProxyMiddleware({
+    target: SERVICES.signing,
+    changeOrigin: true,
+    pathRewrite: { '^/api/certificates': '/api/certificates' },
+  }));
+  
+  app.use('/fhir/Provenance', createProxyMiddleware({
+    target: SERVICES.signing,
+    changeOrigin: true,
+    pathRewrite: { '^/fhir/Provenance': '/fhir/Provenance' },
   }));
   
   // 404 handler

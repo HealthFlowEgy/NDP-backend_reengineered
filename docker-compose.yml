@@ -173,6 +173,83 @@ services:
     networks:
       - ndp-network
 
+  auth-service:
+    build:
+      context: .
+      dockerfile: ./infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: auth-service
+    container_name: ndp-auth-service
+    environment:
+      NODE_ENV: development
+      PORT: 3004
+      LOG_LEVEL: info
+      JWT_SECRET: development-secret-change-in-production
+      JWT_EXPIRES_IN: 1h
+      REFRESH_TOKEN_EXPIRES_IN: 7d
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ndp
+      KEYCLOAK_CLIENT_ID: ndp-backend
+      KEYCLOAK_CLIENT_SECRET: ""
+      SUNBIRD_RC_URL: http://sunbird-rc:8081
+    ports:
+      - "3004:3004"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ndp-network
+
+  signing-service:
+    build:
+      context: .
+      dockerfile: ./infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: signing-service
+    container_name: ndp-signing-service
+    environment:
+      NODE_ENV: development
+      PORT: 3005
+      LOG_LEVEL: info
+    ports:
+      - "3005:3005"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ndp-network
+
+  # ============================================================================
+  # Optional: Keycloak for SSO (Development)
+  # ============================================================================
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0
+    container_name: ndp-keycloak
+    command: start-dev --import-realm
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: ndp
+      KC_DB_PASSWORD: ndp_password
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./infrastructure/keycloak:/opt/keycloak/data/import
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ndp-network
+    profiles:
+      - with-keycloak
+
 # ============================================================================
 # Volumes
 # ============================================================================
