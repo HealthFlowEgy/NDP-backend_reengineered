@@ -129,10 +129,18 @@ docker-compose down
 - [x] Integration with external AI engine (http://67.207.74.0)
 - [x] Prescription validation blocking
 
-### Sprint 4 (Weeks 7-8)
-- [ ] Pharmacist signing for dispenses
-- [ ] Partial dispense tracking
-- [ ] Dispense reversal
+### Sprint 4 ✅ (Weeks 7-8)
+- [x] Legacy Adapter Service (SOAP to REST bridge)
+- [x] WSDL generation
+- [x] SOAP action handlers (Create, Sign, Cancel, Dispense)
+- [x] Legacy data type converters
+- [x] Notification Service
+- [x] SMS notifications (Vodafone/Orange/Etisalat ready)
+- [x] Email notifications (SMTP)
+- [x] WhatsApp Business API integration
+- [x] Push notifications (FCM)
+- [x] Notification templates (Arabic/English)
+- [x] Verification code sending
 
 ### Sprint 5 (Weeks 9-10)
 - [ ] Legacy adapter

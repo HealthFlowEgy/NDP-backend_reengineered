@@ -24,6 +24,8 @@ const SERVICES = {
   auth: process.env['AUTH_SERVICE_URL'] || 'http://localhost:3004',
   signing: process.env['SIGNING_SERVICE_URL'] || 'http://localhost:3005',
   aiValidation: process.env['AI_VALIDATION_SERVICE_URL'] || 'http://localhost:3006',
+  legacy: process.env['LEGACY_ADAPTER_URL'] || 'http://localhost:3007',
+  notification: process.env['NOTIFICATION_SERVICE_URL'] || 'http://localhost:3008',
 };
 
 async function main() {
@@ -230,6 +232,33 @@ async function main() {
     target: SERVICES.aiValidation,
     changeOrigin: true,
     pathRewrite: { '^/api/interactions': '/api/interactions' },
+  }));
+  
+  // Proxy to Legacy Adapter (SOAP endpoint)
+  app.use('/soap', createProxyMiddleware({
+    target: SERVICES.legacy,
+    changeOrigin: true,
+    onError: (err, req, res) => {
+      logger.error('Proxy error (legacy)', err);
+      (res as Response).status(502).send('Legacy adapter unavailable');
+    },
+  }));
+  
+  app.use('/api/legacy', createProxyMiddleware({
+    target: SERVICES.legacy,
+    changeOrigin: true,
+    pathRewrite: { '^/api/legacy': '/api/legacy' },
+  }));
+  
+  // Proxy to Notification Service
+  app.use('/api/notifications', createProxyMiddleware({
+    target: SERVICES.notification,
+    changeOrigin: true,
+    pathRewrite: { '^/api/notifications': '/api/notifications' },
+    onError: (err, req, res) => {
+      logger.error('Proxy error (notification)', err);
+      (res as Response).status(502).json({ error: { code: 'NOTIFICATION_UNAVAILABLE', message: 'Notification service unavailable' } });
+    },
   }));
   
   // 404 handler
