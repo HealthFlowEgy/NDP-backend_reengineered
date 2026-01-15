@@ -1,0 +1,190 @@
+version: '3.8'
+
+services:
+  # ============================================================================
+  # Infrastructure
+  # ============================================================================
+  
+  postgres:
+    image: postgres:15-alpine
+    container_name: ndp-postgres
+    environment:
+      POSTGRES_DB: ndp
+      POSTGRES_USER: ndp
+      POSTGRES_PASSWORD: ndp_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/scripts:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ndp -d ndp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ndp-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: ndp-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ndp-network
+
+  # ============================================================================
+  # Application Services
+  # ============================================================================
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: ./infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: api-gateway
+    container_name: ndp-api-gateway
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      LOG_LEVEL: info
+      CORS_ORIGINS: "*"
+      RATE_LIMIT_PER_MINUTE: 100
+      PRESCRIPTION_SERVICE_URL: http://prescription-service:3001
+      DISPENSE_SERVICE_URL: http://dispense-service:3002
+      MEDICATION_SERVICE_URL: http://medication-directory:3003
+    ports:
+      - "3000:3000"
+    depends_on:
+      prescription-service:
+        condition: service_healthy
+      dispense-service:
+        condition: service_healthy
+      medication-directory:
+        condition: service_healthy
+    networks:
+      - ndp-network
+
+  prescription-service:
+    build:
+      context: .
+      dockerfile: ./infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: prescription-service
+    container_name: ndp-prescription-service
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      LOG_LEVEL: info
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ndp
+      DB_USER: ndp
+      DB_PASSWORD: ndp_password
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: development-secret-change-in-production
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ndp-network
+
+  dispense-service:
+    build:
+      context: .
+      dockerfile: ./infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: dispense-service
+    container_name: ndp-dispense-service
+    environment:
+      NODE_ENV: development
+      PORT: 3002
+      LOG_LEVEL: info
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ndp
+      DB_USER: ndp
+      DB_PASSWORD: ndp_password
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3002:3002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ndp-network
+
+  medication-directory:
+    build:
+      context: .
+      dockerfile: ./infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: medication-directory
+    container_name: ndp-medication-directory
+    environment:
+      NODE_ENV: development
+      PORT: 3003
+      LOG_LEVEL: info
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ndp
+      DB_USER: ndp
+      DB_PASSWORD: ndp_password
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3003:3003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ndp-network
+
+# ============================================================================
+# Volumes
+# ============================================================================
+
+volumes:
+  postgres_data:
+  redis_data:
+
+# ============================================================================
+# Networks
+# ============================================================================
+
+networks:
+  ndp-network:
+    driver: bridge

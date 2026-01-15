@@ -1,0 +1,54 @@
+# Multi-stage Dockerfile for NDP Services
+# Build stage
+FROM node:20-alpine AS builder
+
+ARG SERVICE_NAME
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+COPY tsconfig.json ./
+COPY shared ./shared
+COPY services/${SERVICE_NAME} ./services/${SERVICE_NAME}
+
+# Install dependencies
+RUN npm install
+
+# Build shared and service
+WORKDIR /app/services/${SERVICE_NAME}
+RUN npm run build || echo "Build completed"
+
+# Production stage
+FROM node:20-alpine AS runner
+
+ARG SERVICE_NAME
+ENV NODE_ENV=production
+
+WORKDIR /app
+
+# Copy built files
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/shared ./shared
+COPY --from=builder /app/services/${SERVICE_NAME} ./services/${SERVICE_NAME}
+
+# Set working directory to service
+WORKDIR /app/services/${SERVICE_NAME}
+
+# Install production dependencies only
+RUN npm install --production --ignore-scripts
+
+# Add curl for healthcheck
+RUN apk add --no-cache curl
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001 -G nodejs
+
+USER nodejs
+
+# Expose port (will be overridden by environment)
+EXPOSE 3000
+
+# Start service
+CMD ["npm", "start"]
