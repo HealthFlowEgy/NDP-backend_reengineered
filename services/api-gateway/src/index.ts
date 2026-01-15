@@ -23,6 +23,7 @@ const SERVICES = {
   medication: process.env['MEDICATION_SERVICE_URL'] || 'http://localhost:3003',
   auth: process.env['AUTH_SERVICE_URL'] || 'http://localhost:3004',
   signing: process.env['SIGNING_SERVICE_URL'] || 'http://localhost:3005',
+  aiValidation: process.env['AI_VALIDATION_SERVICE_URL'] || 'http://localhost:3006',
 };
 
 async function main() {
@@ -212,6 +213,23 @@ async function main() {
     target: SERVICES.signing,
     changeOrigin: true,
     pathRewrite: { '^/fhir/Provenance': '/fhir/Provenance' },
+  }));
+  
+  // Proxy to AI Validation Service
+  app.use('/api/validate', createProxyMiddleware({
+    target: SERVICES.aiValidation,
+    changeOrigin: true,
+    pathRewrite: { '^/api/validate': '/api/validate' },
+    onError: (err, req, res) => {
+      logger.error('Proxy error (ai-validation)', err);
+      (res as Response).status(502).json({ error: { code: 'AI_VALIDATION_UNAVAILABLE', message: 'AI validation service unavailable' } });
+    },
+  }));
+  
+  app.use('/api/interactions', createProxyMiddleware({
+    target: SERVICES.aiValidation,
+    changeOrigin: true,
+    pathRewrite: { '^/api/interactions': '/api/interactions' },
   }));
   
   // 404 handler

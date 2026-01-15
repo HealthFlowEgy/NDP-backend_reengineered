@@ -119,11 +119,15 @@ docker-compose down
 - [x] Prescription signing workflow
 - [x] Signature verification
 
-### Sprint 3 (Weeks 5-6)
-- [ ] AI validation service integration
-- [ ] Drug-drug interaction checks
-- [ ] Dosage validation
-- [ ] Contraindication alerts
+### Sprint 3 ✅ (Weeks 5-6)
+- [x] AI Validation Service
+- [x] Drug-drug interaction checking (10+ rules)
+- [x] Dosage validation with renal/hepatic adjustments
+- [x] Contraindication alerts
+- [x] Allergy checking with cross-reactivity
+- [x] Duplicate therapy detection
+- [x] Integration with external AI engine (http://67.207.74.0)
+- [x] Prescription validation blocking
 
 ### Sprint 4 (Weeks 7-8)
 - [ ] Pharmacist signing for dispenses

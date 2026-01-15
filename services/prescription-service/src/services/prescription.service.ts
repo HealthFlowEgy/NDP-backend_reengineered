@@ -36,6 +36,13 @@ import {
   addSignatureToMedicationRequest,
   MedicationInfo 
 } from '../builders/medication-request.builder.js';
+import {
+  aiValidationClient,
+  validatePrescriptionMedications,
+  shouldBlockPrescription,
+  formatValidationSummary,
+  PatientContext
+} from '../clients/ai-validation.client.js';
 
 const logger = createLogger('prescription-service:service');
 
@@ -74,10 +81,58 @@ export class PrescriptionService {
       commercialName: med.medicationName || med.edaCode,
     }));
     
-    // TODO: Call AI validation service if enabled
+    // AI Validation
     let aiValidation: AIValidationResult | undefined;
-    if (!request.skipAIValidation) {
-      // aiValidation = await this.validateWithAI(request.medications, request.patientNationalId);
+    if (!request.skipAIValidation && aiValidationClient.isEnabled()) {
+      logger.info('Running AI validation', { 
+        patientNationalId: request.patientNationalId,
+        medicationCount: request.medications.length 
+      });
+      
+      try {
+        aiValidation = await validatePrescriptionMedications(
+          undefined, // No prescription ID yet
+          request,
+          {
+            // Additional patient context can be added here
+            // age, weight, conditions, allergies, etc.
+          }
+        );
+        
+        // Check if validation should block prescription
+        const blockCheck = shouldBlockPrescription(aiValidation);
+        if (blockCheck.block) {
+          logger.warn('AI validation blocked prescription', { 
+            reason: blockCheck.reason,
+            score: aiValidation.overallScore 
+          });
+          throw new NDPError(
+            ErrorCodes.AI_VALIDATION_FAILED,
+            blockCheck.reason || 'Prescription failed AI validation',
+            400,
+            {
+              validationResult: aiValidation,
+              summary: formatValidationSummary(aiValidation),
+            }
+          );
+        }
+        
+        // Log warnings if any
+        if (aiValidation.warnings.length > 0 || aiValidation.drugInteractions.length > 0) {
+          logger.info('AI validation passed with warnings', {
+            score: aiValidation.overallScore,
+            warnings: aiValidation.warnings.length,
+            interactions: aiValidation.drugInteractions.length,
+            summary: formatValidationSummary(aiValidation),
+          });
+        }
+      } catch (error) {
+        if (error instanceof NDPError && error.code === ErrorCodes.AI_VALIDATION_FAILED) {
+          throw error; // Re-throw validation failures
+        }
+        // Log other errors but continue (skipOnError behavior)
+        logger.warn('AI validation error, continuing without validation', { error });
+      }
     }
     
     // Generate prescription number

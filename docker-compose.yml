@@ -223,6 +223,29 @@ services:
     networks:
       - ndp-network
 
+  ai-validation-service:
+    build:
+      context: .
+      dockerfile: ./infrastructure/docker/Dockerfile.service
+      args:
+        SERVICE_NAME: ai-validation-service
+    container_name: ndp-ai-validation-service
+    environment:
+      NODE_ENV: development
+      PORT: 3006
+      LOG_LEVEL: info
+      AI_ENGINE_URL: http://67.207.74.0
+      AI_ENGINE_TIMEOUT: 10000
+    ports:
+      - "3006:3006"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ndp-network
+
   # ============================================================================
   # Optional: Keycloak for SSO (Development)
   # ============================================================================
