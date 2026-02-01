@@ -504,6 +504,48 @@ services:
     networks:
       - ndp-network
 
+  # -----------------------------------------------------------------------------
+  # FHIR SERVER (HAPI)
+  # -----------------------------------------------------------------------------
+  hapi-fhir:
+    image: hapiproject/hapi:latest
+    container_name: hapi-fhir
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://hapi-db:5432/hapi
+      - SPRING_DATASOURCE_USERNAME=hapi
+      - SPRING_DATASOURCE_PASSWORD=hapi_password
+      - SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT=org.hibernate.dialect.PostgreSQLDialect
+      - HAPI_FHIR_FHIR_VERSION=R4
+      - HAPI_FHIR_ALLOW_MULTIPLE_DELETE=true
+      - HAPI_FHIR_ALLOW_EXTERNAL_REFERENCES=true
+    depends_on:
+      - hapi-db
+    networks:
+      - ndp-network
+    restart: unless-stopped
+    profiles:
+      - with-fhir
+
+  hapi-db:
+    image: postgres:15-alpine
+    container_name: hapi-db
+    environment:
+      - POSTGRES_DB=hapi
+      - POSTGRES_USER=hapi
+      - POSTGRES_PASSWORD=hapi_password
+    volumes:
+      - hapi_postgres_data:/var/lib/postgresql/data
+    networks:
+      - ndp-network
+    restart: unless-stopped
+    profiles:
+      - with-fhir
+
+  # -----------------------------------------------------------------------------
+  # OBSERVABILITY
+  # -----------------------------------------------------------------------------
 # ============================================================================
 # Networks
 # ============================================================================
@@ -518,6 +560,7 @@ networks:
 
 volumes:
   postgres_data:
+  hapi_postgres_data:
   redis_data:
   zookeeper_data:
   zookeeper_log:
