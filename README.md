@@ -692,8 +692,8 @@ Proprietary - Egyptian Ministry of Health & Population
 ## 📞 Support
 
 For technical support and inquiries:
-- **Email**: support@ndp.egypt.gov.eg
-- **DevOps Team**: devops@ndp.egypt.gov.eg
+- **Email**: support@healthflow.tech
+- **DevOps Team**: devops@healthflow.tech
 - **Emergency**: +20-xxx-xxx-xxxx
 
 ---
